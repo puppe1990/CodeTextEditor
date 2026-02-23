@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CodeSnip Editor</title>
+  <link rel="stylesheet" href="editor.css">
+</head>
+<body>
+  <div id="app" class="app">
+    <div class="topbar">
+      <div class="topbar-left">
+        <span class="logo">CodeSnip</span>
+        <div class="menu">
+          <button class="menu-item" data-action="file">File ▼</button>
+          <button class="menu-item" data-action="edit">Edit ▼</button>
+          <button class="menu-item" data-action="view">View ▼</button>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <span class="build-badge">v1.0.2</span>
+        <button id="themeToggle" class="icon-btn" title="Toggle Theme">🌓</button>
+      </div>
+    </div>
+    
+    <div class="main-container">
+      <div id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+          <span>Explorer</span>
+          <div class="sidebar-actions">
+            <button id="openFolderBtn" class="icon-btn-small" title="Open Folder">📂</button>
+            <button id="newFileBtn" class="icon-btn-small" title="New File">📄</button>
+            <button id="newFolderBtn" class="icon-btn-small" title="New Folder">📁</button>
+            <button id="refreshBtn" class="icon-btn-small" title="Refresh">🔄</button>
+          </div>
+        </div>
+        <div id="fileTree" class="file-tree">
+          <div class="empty-state">
+            <p>Press Ctrl+O to open a folder</p>
+          </div>
+        </div>
+      </div>
+      
+      <div class="editor-container">
+        <div id="editor" class="editor"></div>
+        <div id="statusBar" class="status-bar">
+          <span id="fileName">No file open</span>
+          <span class="spacer"></span>
+          <span id="cursorPosition">Ln 1, Col 1</span>
+          <span id="language">Plain Text</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="contextMenu" class="context-menu hidden">
+    <ul>
+      <li data-action="newFile">New File</li>
+      <li data-action="newFolder">New Folder</li>
+      <li data-action="rename">Rename</li>
+      <li data-action="delete">Delete</li>
+    </ul>
+  </div>
+
+  <script type="module" src="editor.js"></script>
+</body>
+</html>

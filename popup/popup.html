@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>CodeSnip Editor</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="popup-container">
+    <div class="header">
+      <h1>CodeSnip Editor</h1>
+    </div>
+    <div class="content">
+      <button id="openEditor" class="btn-primary">
+        <span class="icon">📝</span>
+        Abrir Editor
+      </button>
+      <div class="settings">
+        <label>
+          <span>Tema:</span>
+          <select id="themeSelect">
+            <option value="dark">Dark</option>
+            <option value="light">Light</option>
+          </select>
+        </label>
+      </div>
+    </div>
+    <div class="footer">
+      <small>v1.0.0</small>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>
