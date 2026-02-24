@@ -26908,15 +26908,15 @@ function tokensFor(d) {
         input.advance();
       if (quoted && input.next == 39)
         input.advance();
-      input.acceptToken(Number2);
+      input.acceptToken(Number);
     } else if (next == 46 && input.next >= 48 && input.next <= 57) {
       readNumber(input, true);
-      input.acceptToken(Number2);
+      input.acceptToken(Number);
     } else if (next == 46) {
       input.acceptToken(Dot);
     } else if (next >= 48 && next <= 57) {
       readNumber(input, false);
-      input.acceptToken(Number2);
+      input.acceptToken(Number);
     } else if (inString(next, d.operatorChars)) {
       while (inString(input.next, d.operatorChars))
         input.advance();
@@ -27117,7 +27117,7 @@ function sql(config2 = {}) {
     })
   ]);
 }
-var whitespace, LineComment2, BlockComment2, String$12, Number2, Bool2, Null, ParenL2, ParenR, BraceL2, BraceR, BracketL2, BracketR, Semi, Dot, Operator, Punctuation2, SpecialVar, Identifier3, QuotedIdentifier, Keyword, Type2, Bits, Bytes, Builtin, Space, SQLTypes, SQLKeywords, defaults3, tokens, parser$1, EndFrom, Span, QuotedSpan, CompletionLevel, parser7, SQLDialect, StandardSQL, PostgreSQL, MySQLKeywords, MySQLTypes, MySQLBuiltin, MySQL, MariaSQL, MSSQLBuiltin, MSSQL, SQLite, Cassandra, PLSQL;
+var whitespace, LineComment2, BlockComment2, String$12, Number, Bool2, Null, ParenL2, ParenR, BraceL2, BraceR, BracketL2, BracketR, Semi, Dot, Operator, Punctuation2, SpecialVar, Identifier3, QuotedIdentifier, Keyword, Type2, Bits, Bytes, Builtin, Space, SQLTypes, SQLKeywords, defaults3, tokens, parser$1, EndFrom, Span, QuotedSpan, CompletionLevel, parser7, SQLDialect, StandardSQL, PostgreSQL, MySQLKeywords, MySQLTypes, MySQLBuiltin, MySQL, MariaSQL, MSSQLBuiltin, MSSQL, SQLite, Cassandra, PLSQL;
 var init_dist21 = __esm({
   "node_modules/@codemirror/lang-sql/dist/index.js"() {
     init_dist5();
@@ -27128,7 +27128,7 @@ var init_dist21 = __esm({
     LineComment2 = 1;
     BlockComment2 = 2;
     String$12 = 3;
-    Number2 = 4;
+    Number = 4;
     Bool2 = 5;
     Null = 6;
     ParenL2 = 7;
@@ -28806,6 +28806,24 @@ var init_fileSystem = __esm({
         this.storeName = "kv";
         this.lastFolderKey = "lastFolderHandle";
       }
+      async saveSession(currentFilePath) {
+        const session = {
+          folderName: this.rootHandle?.name || null,
+          currentFilePath: currentFilePath || null,
+          timestamp: Date.now()
+        };
+        chrome.storage.local.set({ editorSession: session });
+      }
+      async loadSession() {
+        return new Promise((resolve) => {
+          chrome.storage.local.get(["editorSession"], (result) => {
+            resolve(result.editorSession || null);
+          });
+        });
+      }
+      async clearSession() {
+        chrome.storage.local.remove(["editorSession"]);
+      }
       async openDirectory() {
         try {
           const handle = await window.showDirectoryPicker();
@@ -29059,6 +29077,63 @@ var init_fileTree = __esm({
         this.renderCallback = null;
         this.selectedHandle = null;
         this.contextMenuTarget = null;
+        this.gitignorePatterns = [];
+      }
+      async loadGitignore(rootHandle) {
+        this.gitignorePatterns = [];
+        try {
+          const gitignoreHandle = await rootHandle.getFileHandle(".gitignore");
+          const file = await gitignoreHandle.getFile();
+          const content2 = await file.text();
+          this.gitignorePatterns = this.parseGitignore(content2);
+        } catch (err) {
+        }
+      }
+      parseGitignore(content2) {
+        const patterns = [];
+        const lines = content2.split("\n");
+        for (const line of lines) {
+          const trimmed = line.trim();
+          if (!trimmed || trimmed.startsWith("#")) continue;
+          const negated = trimmed.startsWith("!");
+          const rawPattern = negated ? trimmed.slice(1).trim() : trimmed;
+          if (!rawPattern) continue;
+          patterns.push({ pattern: rawPattern, negated });
+        }
+        return patterns;
+      }
+      matchesGitignore(filePath, isDirectory = false) {
+        const normalizedPath = filePath.replace(/^\.?\//, "").replace(/\/+$/, "");
+        const fileName = normalizedPath.split("/").pop();
+        let ignored = false;
+        for (const rule of this.gitignorePatterns) {
+          if (this.ruleMatchesPath(rule.pattern, normalizedPath, fileName, isDirectory)) {
+            ignored = !rule.negated;
+          }
+        }
+        return ignored;
+      }
+      ruleMatchesPath(pattern, normalizedPath, fileName, isDirectory) {
+        const directoryOnly = pattern.endsWith("/");
+        const cleanPattern = directoryOnly ? pattern.slice(0, -1) : pattern;
+        const anchored = cleanPattern.startsWith("/");
+        const relativePattern = anchored ? cleanPattern.slice(1) : cleanPattern;
+        if (directoryOnly && !isDirectory) {
+          return false;
+        }
+        const wildcardRegex = this.buildWildcardRegex(relativePattern);
+        const basenameRegex = this.buildWildcardRegex(fileName ? relativePattern : "");
+        if (anchored) {
+          return wildcardRegex.test(normalizedPath);
+        }
+        if (!relativePattern.includes("/")) {
+          return basenameRegex.test(fileName);
+        }
+        return wildcardRegex.test(normalizedPath) || wildcardRegex.test(`/${normalizedPath}`);
+      }
+      buildWildcardRegex(pattern) {
+        const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*").replace(/\?/g, ".");
+        return new RegExp(`^${escaped}$`);
       }
       async init(renderCallback) {
         this.renderCallback = renderCallback;
@@ -29067,13 +29142,16 @@ var init_fileTree = __esm({
       async openFolder() {
         const handle = await fileSystem.openDirectory();
         if (handle) {
+          await this.loadGitignore(handle);
           await this.refresh();
+          await fileSystem.clearSession();
         }
         return handle;
       }
       async restoreLastFolder() {
         const handle = await fileSystem.loadLastOpenedFolder();
         if (handle) {
+          await this.loadGitignore(handle);
           await this.refresh();
         }
         return handle;
@@ -29252,6 +29330,9 @@ var init_fileTree = __esm({
       async getAllFiles() {
         const rootHandle = fileSystem.getRootHandle();
         if (!rootHandle) return [];
+        if (this.gitignorePatterns.length === 0) {
+          await this.loadGitignore(rootHandle);
+        }
         return this.collectAllFiles(rootHandle, "");
       }
       async collectAllFiles(directoryHandle, parentPath) {
@@ -29259,10 +29340,14 @@ var init_fileTree = __esm({
         const entries = await fileSystem.readDirectoryLevel(directoryHandle, parentPath);
         for (const entry of entries) {
           if (entry.kind === "file") {
-            files.push({ name: entry.name, path: entry.path, handle: entry.handle });
+            if (!this.matchesGitignore(entry.path, false)) {
+              files.push({ name: entry.name, path: entry.path, handle: entry.handle });
+            }
           } else if (entry.kind === "directory") {
-            const nestedFiles = await this.collectAllFiles(entry.handle, entry.path);
-            files.push(...nestedFiles);
+            if (!this.matchesGitignore(entry.path, true)) {
+              const nestedFiles = await this.collectAllFiles(entry.handle, entry.path);
+              files.push(...nestedFiles);
+            }
           }
         }
         return files;
@@ -29438,6 +29523,7 @@ var require_editor = __commonJS({
     init_dist23();
     init_dist24();
     init_fileTree();
+    init_fileSystem();
     init_shortcuts();
     var LANGUAGE_EXTENSIONS = {
       js: javascript({ jsx: true, typescript: false }),
@@ -29492,7 +29578,16 @@ var require_editor = __commonJS({
           fontSize: 14,
           tabSize: 2
         };
+        this.openTabs = [];
+        this.activeTabId = null;
         this.activeTopMenu = null;
+        this.quickOpen = {
+          open: false,
+          entries: [],
+          selectedIndex: 0,
+          files: [],
+          commands: []
+        };
         this.init();
       }
       async init() {
@@ -29501,7 +29596,38 @@ var require_editor = __commonJS({
         this.initEventListeners();
         await fileTree.init(this.renderFileTree.bind(this));
         await fileTree.restoreLastFolder();
+        await this.restoreSession();
+        this.initQuickOpen();
+        this.renderTabs();
         this.updateStatusBar();
+      }
+      async restoreSession() {
+        const session = await fileSystem.loadSession();
+        if (!session || !session.currentFilePath) return;
+        const rootHandle = fileSystem.getRootHandle();
+        if (!rootHandle) return;
+        try {
+          const fileHandle = await this.findFileByPath(rootHandle, session.currentFilePath);
+          if (fileHandle) {
+            await this.openFile(fileHandle, session.currentFilePath);
+          }
+        } catch (err) {
+          console.warn("Cannot restore last session:", err);
+        }
+      }
+      async findFileByPath(dirHandle, targetPath) {
+        const parts = targetPath.split("/");
+        let currentHandle = dirHandle;
+        for (let i = 0; i < parts.length; i++) {
+          const name2 = parts[i];
+          const isLast = i === parts.length - 1;
+          if (isLast) {
+            return await currentHandle.getFileHandle(name2);
+          } else {
+            currentHandle = await currentHandle.getDirectoryHandle(name2);
+          }
+        }
+        return null;
       }
       async loadSettings() {
         return new Promise((resolve) => {
@@ -29603,8 +29729,16 @@ var require_editor = __commonJS({
           ]),
           languageExtension,
           EditorView.updateListener.of((update) => {
+            const activeTab = this.getActiveTab();
+            if (activeTab) {
+              activeTab.state = update.state;
+            }
             if (update.docChanged) {
+              if (activeTab) {
+                activeTab.dirty = true;
+              }
               this.dirty = true;
+              this.renderTabs();
               this.updateStatusBar();
             }
             if (update.selectionSet) {
@@ -29637,15 +29771,24 @@ var require_editor = __commonJS({
       }
       rebuildEditorState({ preserveSelection = true } = {}) {
         if (!this.view) return;
-        const currentDoc = this.view.state.doc.toString();
+        const activeTab = this.getActiveTab();
         const currentSelection = this.view.state.selection.main;
-        const selectionAnchor = preserveSelection ? Math.min(currentSelection.anchor, currentDoc.length) : 0;
-        const nextState = this.createState(currentDoc, this.currentLanguageExtension);
-        this.view.setState(nextState);
-        if (preserveSelection) {
-          this.view.dispatch({
-            selection: { anchor: selectionAnchor }
-          });
+        this.openTabs = this.openTabs.map((tab2) => {
+          const baseState = tab2.id === this.activeTabId ? this.view.state : tab2.state;
+          const doc2 = baseState.doc.toString();
+          const nextState = this.createState(doc2, tab2.languageExtension);
+          if (tab2.id === this.activeTabId && preserveSelection) {
+            const anchor = Math.min(currentSelection.anchor, doc2.length);
+            return {
+              ...tab2,
+              state: nextState.update({ selection: { anchor } }).state
+            };
+          }
+          return { ...tab2, state: nextState };
+        });
+        if (activeTab) {
+          const nextActive = this.getActiveTab();
+          this.view.setState(nextActive.state);
         }
         this.updateStatusBar();
       }
@@ -29663,26 +29806,45 @@ var require_editor = __commonJS({
         this.rebuildEditorState();
       }
       async openFile(handle, path = handle?.name || "") {
-        this.currentFileHandle = handle;
         const file = await handle.getFile();
-        const content2 = await file.text();
-        this.currentFileName = file.name;
-        this.currentLanguage = this.getLanguageFromFileName(file.name);
-        this.currentLanguageExtension = this.getLanguageExtension(file.name);
-        const nextState = this.createState(content2, this.currentLanguageExtension);
-        this.view.setState(nextState);
-        this.dirty = false;
-        this.updateStatusBar();
+        const tabId = path || handle.name;
+        const existing = this.openTabs.find((tab3) => tab3.id === tabId);
+        if (existing) {
+          this.setActiveTab(existing.id);
+          this.view.focus();
+          await fileSystem.saveSession(existing.path || existing.name);
+          return;
+        }
+        const language2 = this.getLanguageFromFileName(file.name);
+        const languageExtension = this.getLanguageExtension(file.name);
+        const state = this.createState(await file.text(), languageExtension);
+        const tab2 = {
+          id: tabId,
+          name: file.name,
+          path: path || file.name,
+          handle,
+          language: language2,
+          languageExtension,
+          state,
+          dirty: false
+        };
+        this.openTabs.push(tab2);
+        this.setActiveTab(tab2.id);
         this.view.focus();
-        this.saveRecentFile(path || file.name);
+        this.saveRecentFile(tab2.path);
+        await fileSystem.saveSession(tab2.path);
       }
       async saveCurrentFile() {
-        if (!this.currentFileHandle) return;
+        const activeTab = this.getActiveTab();
+        if (!activeTab) return;
         const content2 = this.view.state.doc.toString();
-        const writable = await this.currentFileHandle.createWritable();
+        const writable = await activeTab.handle.createWritable();
         await writable.write(content2);
         await writable.close();
+        activeTab.dirty = false;
+        activeTab.state = this.view.state;
         this.dirty = false;
+        this.renderTabs();
         this.updateStatusBar();
       }
       duplicateLine() {
@@ -29734,10 +29896,84 @@ ${line.text}`;
         if (!this.view) return;
         toggleComment(this.view);
       }
+      getActiveTab() {
+        return this.openTabs.find((tab2) => tab2.id === this.activeTabId) || null;
+      }
+      setActiveTab(tabId) {
+        const tab2 = this.openTabs.find((item) => item.id === tabId);
+        if (!tab2) return;
+        this.activeTabId = tab2.id;
+        this.currentFileHandle = tab2.handle;
+        this.currentFileName = tab2.name;
+        this.currentLanguage = tab2.language;
+        this.currentLanguageExtension = tab2.languageExtension;
+        this.dirty = Boolean(tab2.dirty);
+        this.view.setState(tab2.state);
+        this.renderTabs();
+        this.updateStatusBar();
+      }
+      closeTab(tabId) {
+        const idx = this.openTabs.findIndex((tab2) => tab2.id === tabId);
+        if (idx === -1) return;
+        const wasActive = this.activeTabId === tabId;
+        this.openTabs.splice(idx, 1);
+        if (!this.openTabs.length) {
+          this.activeTabId = null;
+          this.currentFileHandle = null;
+          this.currentFileName = "No file open";
+          this.currentLanguage = "Plain Text";
+          this.currentLanguageExtension = [];
+          this.dirty = false;
+          this.view.setState(this.createState("", []));
+          fileSystem.clearSession();
+          this.renderTabs();
+          this.updateStatusBar();
+          return;
+        }
+        if (wasActive) {
+          const nextIdx = Math.max(0, idx - 1);
+          this.setActiveTab(this.openTabs[nextIdx].id);
+          fileSystem.saveSession(this.openTabs[nextIdx].path);
+        } else {
+          this.renderTabs();
+        }
+      }
+      renderTabs() {
+        const tabsEl = document.getElementById("tabs");
+        if (!tabsEl) return;
+        tabsEl.innerHTML = "";
+        this.openTabs.forEach((tab2) => {
+          const item = document.createElement("div");
+          item.className = `tab-item${tab2.id === this.activeTabId ? " active" : ""}`;
+          item.dataset.tabId = tab2.id;
+          const name2 = document.createElement("span");
+          name2.className = "tab-item-name";
+          name2.textContent = tab2.name;
+          const dirty = document.createElement("span");
+          dirty.className = "tab-item-dirty";
+          dirty.textContent = tab2.dirty ? "\u2022" : "";
+          const close = document.createElement("button");
+          close.type = "button";
+          close.className = "tab-item-close";
+          close.textContent = "\xD7";
+          close.title = `Close ${tab2.name}`;
+          close.dataset.tabClose = tab2.id;
+          item.appendChild(name2);
+          item.appendChild(dirty);
+          item.appendChild(close);
+          tabsEl.appendChild(item);
+        });
+      }
       updateStatusBar() {
         const fileNameEl = document.getElementById("fileName");
         const cursorEl = document.getElementById("cursorPosition");
         const languageEl = document.getElementById("language");
+        const activeTab = this.getActiveTab();
+        if (activeTab) {
+          this.currentFileName = activeTab.name;
+          this.currentLanguage = activeTab.language;
+          this.dirty = Boolean(activeTab.dirty);
+        }
         if (fileNameEl) {
           fileNameEl.textContent = this.dirty ? `${this.currentFileName} \u2022` : this.currentFileName;
         }
@@ -29763,31 +29999,7 @@ ${line.text}`;
         });
       }
       async quickOpenFile() {
-        const files = await fileTree.getAllFiles();
-        if (!files.length) {
-          alert("Abra uma pasta primeiro (Cmd/Ctrl+O).");
-          return;
-        }
-        const query = prompt("Quick Open (Cmd/Ctrl+P): digite parte do nome do arquivo");
-        if (!query) return;
-        const normalizedQuery = query.trim().toLowerCase();
-        const matches = files.filter((file) => file.path.toLowerCase().includes(normalizedQuery));
-        if (!matches.length) {
-          alert("Nenhum arquivo encontrado.");
-          return;
-        }
-        if (matches.length === 1) {
-          await this.openFile(matches[0].handle, matches[0].path);
-          return;
-        }
-        const topMatches = matches.slice(0, 20);
-        const options = topMatches.map((file, index2) => `${index2 + 1}. ${file.path}`).join("\n");
-        const choice = prompt(`Selecione o numero do arquivo:
-${options}`);
-        const index = Number(choice) - 1;
-        if (Number.isInteger(index) && index >= 0 && index < topMatches.length) {
-          await this.openFile(topMatches[index].handle, topMatches[index].path);
-        }
+        await this.openQuickOpen();
       }
       initEventListeners() {
         this.initTopMenus();
@@ -29805,6 +30017,18 @@ ${options}`);
         });
         document.getElementById("refreshBtn")?.addEventListener("click", async () => {
           await fileTree.refresh();
+        });
+        document.getElementById("tabs")?.addEventListener("click", (e) => {
+          const closeBtn = e.target.closest("[data-tab-close]");
+          if (closeBtn) {
+            e.stopPropagation();
+            this.closeTab(closeBtn.dataset.tabClose);
+            return;
+          }
+          const tabEl = e.target.closest(".tab-item");
+          if (tabEl?.dataset.tabId) {
+            this.setActiveTab(tabEl.dataset.tabId);
+          }
         });
         shortcuts.init(this);
       }
@@ -29869,6 +30093,147 @@ ${options}`);
         if (!this.activeTopMenu) return;
         this.activeTopMenu.element.remove();
         this.activeTopMenu = null;
+      }
+      initQuickOpen() {
+        const overlay = document.getElementById("quickOpenOverlay");
+        const input = document.getElementById("quickOpenInput");
+        const list = document.getElementById("quickOpenList");
+        if (!overlay || !input || !list) return;
+        this.quickOpen.overlay = overlay;
+        this.quickOpen.input = input;
+        this.quickOpen.list = list;
+        this.quickOpen.commands = [
+          { label: "Open folder", meta: "Cmd/Ctrl+O", icon: "\u{1F4C2}", run: async () => fileTree.openFolder() },
+          { label: "New file", meta: "Cmd/Ctrl+N", icon: "\u{1F4C4}", run: async () => fileTree.createNewFile() },
+          { label: "New folder", meta: "UI", icon: "\u{1F4C1}", run: async () => fileTree.createNewFolder() },
+          { label: "Save file", meta: "Cmd/Ctrl+S", icon: "\u{1F4BE}", run: async () => this.saveCurrentFile() },
+          { label: "Toggle sidebar", meta: "Cmd/Ctrl+B", icon: "\u{1F9ED}", run: () => shortcuts.toggleSidebar() },
+          { label: "Toggle theme", meta: "UI", icon: "\u{1F313}", run: () => this.toggleTheme() }
+        ];
+        overlay.addEventListener("click", (e) => {
+          if (e.target === overlay) {
+            this.closeQuickOpen();
+          }
+        });
+        input.addEventListener("input", () => {
+          this.updateQuickOpenEntries(input.value);
+          this.renderQuickOpenEntries();
+        });
+        input.addEventListener("keydown", async (e) => {
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            this.moveQuickOpenSelection(1);
+            return;
+          }
+          if (e.key === "ArrowUp") {
+            e.preventDefault();
+            this.moveQuickOpenSelection(-1);
+            return;
+          }
+          if (e.key === "Enter") {
+            e.preventDefault();
+            await this.confirmQuickOpenSelection();
+            return;
+          }
+          if (e.key === "Escape") {
+            e.preventDefault();
+            this.closeQuickOpen();
+          }
+        });
+      }
+      async openQuickOpen() {
+        if (!this.quickOpen.overlay || !this.quickOpen.input || !this.quickOpen.list) return;
+        this.quickOpen.files = await fileTree.getAllFiles();
+        this.quickOpen.open = true;
+        this.quickOpen.overlay.classList.remove("hidden");
+        this.quickOpen.input.value = "";
+        this.updateQuickOpenEntries("");
+        this.renderQuickOpenEntries();
+        this.quickOpen.input.focus();
+      }
+      closeQuickOpen() {
+        if (!this.quickOpen.open) return;
+        this.quickOpen.open = false;
+        this.quickOpen.overlay.classList.add("hidden");
+        this.quickOpen.entries = [];
+        this.quickOpen.selectedIndex = 0;
+        this.view?.focus();
+      }
+      updateQuickOpenEntries(query) {
+        const q = query.trim().toLowerCase();
+        const commandEntries = this.quickOpen.commands.filter((cmd2) => !q || cmd2.label.toLowerCase().includes(q)).map((cmd2) => ({
+          type: "command",
+          label: cmd2.label,
+          meta: cmd2.meta,
+          icon: cmd2.icon,
+          run: cmd2.run
+        }));
+        const fileEntries = this.quickOpen.files.filter((file) => !q || file.path.toLowerCase().includes(q)).slice(0, 80).map((file) => ({
+          type: "file",
+          label: file.path,
+          meta: "file",
+          icon: "\u{1F7E2}",
+          run: async () => this.openFile(file.handle, file.path)
+        }));
+        this.quickOpen.entries = [...commandEntries, ...fileEntries].slice(0, 100);
+        this.quickOpen.selectedIndex = 0;
+      }
+      renderQuickOpenEntries() {
+        const { list, entries, selectedIndex } = this.quickOpen;
+        if (!list) return;
+        list.innerHTML = "";
+        if (!entries.length) {
+          list.innerHTML = '<div class="quick-open-empty">No results.</div>';
+          return;
+        }
+        entries.forEach((entry, index) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = `quick-open-item${index === selectedIndex ? " active" : ""}`;
+          const main = document.createElement("span");
+          main.className = "quick-open-item-main";
+          const icon = document.createElement("span");
+          icon.className = "quick-open-icon";
+          icon.textContent = entry.icon;
+          const label = document.createElement("span");
+          label.className = "quick-open-label";
+          label.textContent = entry.label;
+          const meta2 = document.createElement("span");
+          meta2.className = "quick-open-meta";
+          meta2.textContent = entry.meta;
+          main.appendChild(icon);
+          main.appendChild(label);
+          button.appendChild(main);
+          button.appendChild(meta2);
+          button.addEventListener("mousemove", () => {
+            if (this.quickOpen.selectedIndex !== index) {
+              this.quickOpen.selectedIndex = index;
+              this.renderQuickOpenEntries();
+            }
+          });
+          button.addEventListener("click", async () => {
+            this.quickOpen.selectedIndex = index;
+            await this.confirmQuickOpenSelection();
+          });
+          list.appendChild(button);
+        });
+      }
+      moveQuickOpenSelection(direction) {
+        const total = this.quickOpen.entries.length;
+        if (!total) return;
+        const next = (this.quickOpen.selectedIndex + direction + total) % total;
+        this.quickOpen.selectedIndex = next;
+        this.renderQuickOpenEntries();
+        const el = this.quickOpen.list?.children[next];
+        if (el && typeof el.scrollIntoView === "function") {
+          el.scrollIntoView({ block: "nearest" });
+        }
+      }
+      async confirmQuickOpenSelection() {
+        const entry = this.quickOpen.entries[this.quickOpen.selectedIndex];
+        if (!entry) return;
+        await entry.run();
+        this.closeQuickOpen();
       }
       saveRecentFile(filePath) {
         chrome.storage.local.get(["recentFiles"], (result) => {

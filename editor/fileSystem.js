@@ -6,6 +6,27 @@ class FileSystem {
     this.lastFolderKey = 'lastFolderHandle';
   }
 
+  async saveSession(currentFilePath) {
+    const session = {
+      folderName: this.rootHandle?.name || null,
+      currentFilePath: currentFilePath || null,
+      timestamp: Date.now(),
+    };
+    chrome.storage.local.set({ editorSession: session });
+  }
+
+  async loadSession() {
+    return new Promise((resolve) => {
+      chrome.storage.local.get(['editorSession'], (result) => {
+        resolve(result.editorSession || null);
+      });
+    });
+  }
+
+  async clearSession() {
+    chrome.storage.local.remove(['editorSession']);
+  }
+
   async openDirectory() {
     try {
       const handle = await window.showDirectoryPicker();

@@ -42,6 +42,9 @@
       </div>
       
       <div class="editor-container">
+        <div id="tabBar" class="tab-bar">
+          <div id="tabs" class="tabs"></div>
+        </div>
         <div id="editor" class="editor"></div>
         <div id="statusBar" class="status-bar">
           <span id="fileName">No file open</span>
@@ -60,6 +63,20 @@
       <li data-action="rename">Rename</li>
       <li data-action="delete">Delete</li>
     </ul>
+  </div>
+
+  <div id="quickOpenOverlay" class="quick-open-overlay hidden">
+    <div class="quick-open-panel">
+      <input
+        id="quickOpenInput"
+        class="quick-open-input"
+        type="text"
+        placeholder="Search files, commands, and sessions"
+        autocomplete="off"
+        spellcheck="false"
+      >
+      <div id="quickOpenList" class="quick-open-list"></div>
+    </div>
   </div>
 
   <script type="module" src="editor.bundle.js"></script>

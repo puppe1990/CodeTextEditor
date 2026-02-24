@@ -6,6 +6,79 @@ class FileTree {
     this.renderCallback = null;
     this.selectedHandle = null;
     this.contextMenuTarget = null;
+    this.gitignorePatterns = [];
+  }
+
+  async loadGitignore(rootHandle) {
+    this.gitignorePatterns = [];
+    try {
+      const gitignoreHandle = await rootHandle.getFileHandle('.gitignore');
+      const file = await gitignoreHandle.getFile();
+      const content = await file.text();
+      this.gitignorePatterns = this.parseGitignore(content);
+    } catch (err) {
+      // .gitignore não existe ou não pode ser lido
+    }
+  }
+
+  parseGitignore(content) {
+    const patterns = [];
+    const lines = content.split('\n');
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      const negated = trimmed.startsWith('!');
+      const rawPattern = negated ? trimmed.slice(1).trim() : trimmed;
+      if (!rawPattern) continue;
+      patterns.push({ pattern: rawPattern, negated });
+    }
+    return patterns;
+  }
+
+  matchesGitignore(filePath, isDirectory = false) {
+    const normalizedPath = filePath.replace(/^\.?\//, '').replace(/\/+$/, '');
+    const fileName = normalizedPath.split('/').pop();
+    let ignored = false;
+
+    for (const rule of this.gitignorePatterns) {
+      if (this.ruleMatchesPath(rule.pattern, normalizedPath, fileName, isDirectory)) {
+        ignored = !rule.negated;
+      }
+    }
+
+    return ignored;
+  }
+
+  ruleMatchesPath(pattern, normalizedPath, fileName, isDirectory) {
+    const directoryOnly = pattern.endsWith('/');
+    const cleanPattern = directoryOnly ? pattern.slice(0, -1) : pattern;
+    const anchored = cleanPattern.startsWith('/');
+    const relativePattern = anchored ? cleanPattern.slice(1) : cleanPattern;
+
+    if (directoryOnly && !isDirectory) {
+      return false;
+    }
+
+    const wildcardRegex = this.buildWildcardRegex(relativePattern);
+    const basenameRegex = this.buildWildcardRegex(fileName ? relativePattern : '');
+
+    if (anchored) {
+      return wildcardRegex.test(normalizedPath);
+    }
+
+    if (!relativePattern.includes('/')) {
+      return basenameRegex.test(fileName);
+    }
+
+    return wildcardRegex.test(normalizedPath) || wildcardRegex.test(`/${normalizedPath}`);
+  }
+
+  buildWildcardRegex(pattern) {
+    const escaped = pattern
+      .replace(/[.+^${}()|[\]\\]/g, '\\$&')
+      .replace(/\*/g, '.*')
+      .replace(/\?/g, '.');
+    return new RegExp(`^${escaped}$`);
   }
 
   async init(renderCallback) {
@@ -16,7 +89,9 @@ class FileTree {
   async openFolder() {
     const handle = await fileSystem.openDirectory();
     if (handle) {
+      await this.loadGitignore(handle);
       await this.refresh();
+      await fileSystem.clearSession();
     }
     return handle;
   }
@@ -24,6 +99,7 @@ class FileTree {
   async restoreLastFolder() {
     const handle = await fileSystem.loadLastOpenedFolder();
     if (handle) {
+      await this.loadGitignore(handle);
       await this.refresh();
     }
     return handle;
@@ -235,6 +311,9 @@ class FileTree {
   async getAllFiles() {
     const rootHandle = fileSystem.getRootHandle();
     if (!rootHandle) return [];
+    if (this.gitignorePatterns.length === 0) {
+      await this.loadGitignore(rootHandle);
+    }
     return this.collectAllFiles(rootHandle, '');
   }
 
@@ -244,10 +323,14 @@ class FileTree {
 
     for (const entry of entries) {
       if (entry.kind === 'file') {
-        files.push({ name: entry.name, path: entry.path, handle: entry.handle });
+        if (!this.matchesGitignore(entry.path, false)) {
+          files.push({ name: entry.name, path: entry.path, handle: entry.handle });
+        }
       } else if (entry.kind === 'directory') {
-        const nestedFiles = await this.collectAllFiles(entry.handle, entry.path);
-        files.push(...nestedFiles);
+        if (!this.matchesGitignore(entry.path, true)) {
+          const nestedFiles = await this.collectAllFiles(entry.handle, entry.path);
+          files.push(...nestedFiles);
+        }
       }
     }
 
