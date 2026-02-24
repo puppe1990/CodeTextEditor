@@ -99,6 +99,7 @@ class CodeEditor {
     this.initEditor();
     this.initEventListeners();
     await fileTree.init(this.renderFileTree.bind(this));
+    await fileTree.restoreLastFolder();
     this.updateStatusBar();
   }
 
@@ -410,24 +411,8 @@ class CodeEditor {
     });
   }
 
-  collectFiles(entries, parentPath = '') {
-    const files = [];
-
-    entries.forEach((entry) => {
-      const currentPath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
-      if (entry.kind === 'file') {
-        files.push({ name: entry.name, path: currentPath, handle: entry.handle });
-      }
-      if (entry.kind === 'directory' && Array.isArray(entry.children)) {
-        files.push(...this.collectFiles(entry.children, currentPath));
-      }
-    });
-
-    return files;
-  }
-
   async quickOpenFile() {
-    const files = this.collectFiles(fileTree.entries || []);
+    const files = await fileTree.getAllFiles();
     if (!files.length) {
       alert('Abra uma pasta primeiro (Cmd/Ctrl+O).');
       return;

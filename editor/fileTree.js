@@ -21,14 +21,22 @@ class FileTree {
     return handle;
   }
 
+  async restoreLastFolder() {
+    const handle = await fileSystem.loadLastOpenedFolder();
+    if (handle) {
+      await this.refresh();
+    }
+    return handle;
+  }
+
   async refresh() {
     const rootHandle = fileSystem.getRootHandle();
     if (!rootHandle) {
       this.renderCallback([], document.getElementById('fileTree'));
       return;
     }
-    
-    const entries = await fileSystem.readDirectoryRecursive(rootHandle, 0, 3);
+
+    const entries = await fileSystem.readDirectoryLevel(rootHandle, '');
     this.entries = entries;
     this.renderCallback(entries, document.getElementById('fileTree'));
   }
@@ -70,22 +78,15 @@ class FileTree {
       });
     }
     
-    if (entry.kind === 'directory' && entry.children) {
-      itemContent.addEventListener('click', () => {
-        this.toggleFolder(item);
+    if (entry.kind === 'directory') {
+      itemContent.addEventListener('click', async () => {
+        await this.toggleFolder(item, entry, currentFileHandle, onFileClick);
       });
-      
+
       const childrenContainer = document.createElement('div');
       childrenContainer.className = 'tree-children';
       childrenContainer.style.display = 'none';
-      
-      entry.children.forEach((child) => {
-        const childItem = this.createTreeItem(child, currentFileHandle, onFileClick);
-        childrenContainer.appendChild(childItem);
-      });
-      
       item.appendChild(childrenContainer);
-      item.classList.add('expanded');
     }
     
     return item;
@@ -115,18 +116,31 @@ class FileTree {
     return icons[ext] || '📄';
   }
 
-  toggleFolder(folderElement) {
+  async toggleFolder(folderElement, entry, currentFileHandle, onFileClick) {
     const children = folderElement.querySelector('.tree-children');
-    if (children) {
-      const isExpanded = folderElement.classList.contains('expanded');
-      if (isExpanded) {
-        children.style.display = 'none';
-        folderElement.classList.remove('expanded');
-      } else {
-        children.style.display = 'block';
-        folderElement.classList.add('expanded');
-      }
+    if (!children) return;
+
+    const isExpanded = folderElement.classList.contains('expanded');
+    if (isExpanded) {
+      children.style.display = 'none';
+      folderElement.classList.remove('expanded');
+      return;
     }
+
+    if (!entry.childrenLoaded) {
+      children.innerHTML = '';
+      const childEntries = await fileSystem.readDirectoryLevel(entry.handle, entry.path);
+      entry.children = childEntries;
+      entry.childrenLoaded = true;
+
+      childEntries.forEach((child) => {
+        const childItem = this.createTreeItem(child, currentFileHandle, onFileClick);
+        children.appendChild(childItem);
+      });
+    }
+
+    children.style.display = 'block';
+    folderElement.classList.add('expanded');
   }
 
   selectItem(itemElement) {
@@ -216,6 +230,28 @@ class FileTree {
       await fileSystem.createDirectory(rootHandle, dirName);
       await this.refresh();
     }
+  }
+
+  async getAllFiles() {
+    const rootHandle = fileSystem.getRootHandle();
+    if (!rootHandle) return [];
+    return this.collectAllFiles(rootHandle, '');
+  }
+
+  async collectAllFiles(directoryHandle, parentPath) {
+    const files = [];
+    const entries = await fileSystem.readDirectoryLevel(directoryHandle, parentPath);
+
+    for (const entry of entries) {
+      if (entry.kind === 'file') {
+        files.push({ name: entry.name, path: entry.path, handle: entry.handle });
+      } else if (entry.kind === 'directory') {
+        const nestedFiles = await this.collectAllFiles(entry.handle, entry.path);
+        files.push(...nestedFiles);
+      }
+    }
+
+    return files;
   }
 }
 

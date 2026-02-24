@@ -28802,6 +28802,9 @@ var init_fileSystem = __esm({
     FileSystem = class {
       constructor() {
         this.rootHandle = null;
+        this.dbName = "codesnip-editor-db";
+        this.storeName = "kv";
+        this.lastFolderKey = "lastFolderHandle";
       }
       async openDirectory() {
         try {
@@ -28830,6 +28833,18 @@ var init_fileSystem = __esm({
           if (a.kind !== "directory" && b.kind === "directory") return 1;
           return a.name.localeCompare(b.name);
         });
+      }
+      async readDirectoryLevel(handle, parentPath = "") {
+        const entries = await this.readDirectory(handle);
+        return entries.map((entry) => ({
+          name: entry.name,
+          kind: entry.kind,
+          handle: entry.handle,
+          parentHandle: handle,
+          path: parentPath ? `${parentPath}/${entry.name}` : entry.name,
+          children: null,
+          childrenLoaded: false
+        }));
       }
       async readDirectoryRecursive(handle, depth = 0, maxDepth = 3, parentPath = "") {
         if (depth > maxDepth) return [];
@@ -28942,6 +28957,7 @@ var init_fileSystem = __esm({
         if (serialized) {
           chrome.storage.local.set({ lastOpenedFolder: serialized });
         }
+        await this.persistHandle(this.lastFolderKey, handle);
       }
       async serializeHandle(handle) {
         try {
@@ -28959,6 +28975,23 @@ var init_fileSystem = __esm({
       setRootHandle(handle) {
         this.rootHandle = handle;
       }
+      async loadLastOpenedFolder() {
+        const handle = await this.getPersistedHandle(this.lastFolderKey);
+        if (!handle) return null;
+        try {
+          let permission = await handle.queryPermission({ mode: "readwrite" });
+          if (permission !== "granted") {
+            permission = await handle.requestPermission({ mode: "readwrite" });
+          }
+          if (permission === "granted") {
+            this.rootHandle = handle;
+            return handle;
+          }
+        } catch (err) {
+          console.warn("Cannot restore last folder handle:", err);
+        }
+        return null;
+      }
       async copyDirectoryContents(sourceDirHandle, targetDirHandle) {
         for await (const entry of sourceDirHandle.values()) {
           if (entry.kind === "file") {
@@ -28972,6 +29005,43 @@ var init_fileSystem = __esm({
             await this.copyDirectoryContents(entry, nestedTarget);
           }
         }
+      }
+      async openDatabase() {
+        if (!globalThis.indexedDB) return null;
+        return new Promise((resolve) => {
+          const request = indexedDB.open(this.dbName, 1);
+          request.onupgradeneeded = () => {
+            const db = request.result;
+            if (!db.objectStoreNames.contains(this.storeName)) {
+              db.createObjectStore(this.storeName);
+            }
+          };
+          request.onsuccess = () => resolve(request.result);
+          request.onerror = () => resolve(null);
+        });
+      }
+      async persistHandle(key, handle) {
+        const db = await this.openDatabase();
+        if (!db) return;
+        await new Promise((resolve) => {
+          const tx = db.transaction(this.storeName, "readwrite");
+          tx.objectStore(this.storeName).put(handle, key);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => resolve();
+        });
+        db.close();
+      }
+      async getPersistedHandle(key) {
+        const db = await this.openDatabase();
+        if (!db) return null;
+        const value = await new Promise((resolve) => {
+          const tx = db.transaction(this.storeName, "readonly");
+          const req = tx.objectStore(this.storeName).get(key);
+          req.onsuccess = () => resolve(req.result || null);
+          req.onerror = () => resolve(null);
+        });
+        db.close();
+        return value;
       }
     };
     fileSystem = new FileSystem();
@@ -29001,13 +29071,20 @@ var init_fileTree = __esm({
         }
         return handle;
       }
+      async restoreLastFolder() {
+        const handle = await fileSystem.loadLastOpenedFolder();
+        if (handle) {
+          await this.refresh();
+        }
+        return handle;
+      }
       async refresh() {
         const rootHandle = fileSystem.getRootHandle();
         if (!rootHandle) {
           this.renderCallback([], document.getElementById("fileTree"));
           return;
         }
-        const entries = await fileSystem.readDirectoryRecursive(rootHandle, 0, 3);
+        const entries = await fileSystem.readDirectoryLevel(rootHandle, "");
         this.entries = entries;
         this.renderCallback(entries, document.getElementById("fileTree"));
       }
@@ -29041,19 +29118,14 @@ var init_fileTree = __esm({
             this.showContextMenu(e, entry);
           });
         }
-        if (entry.kind === "directory" && entry.children) {
-          itemContent.addEventListener("click", () => {
-            this.toggleFolder(item);
+        if (entry.kind === "directory") {
+          itemContent.addEventListener("click", async () => {
+            await this.toggleFolder(item, entry, currentFileHandle, onFileClick);
           });
           const childrenContainer = document.createElement("div");
           childrenContainer.className = "tree-children";
           childrenContainer.style.display = "none";
-          entry.children.forEach((child) => {
-            const childItem = this.createTreeItem(child, currentFileHandle, onFileClick);
-            childrenContainer.appendChild(childItem);
-          });
           item.appendChild(childrenContainer);
-          item.classList.add("expanded");
         }
         return item;
       }
@@ -29080,18 +29152,27 @@ var init_fileTree = __esm({
         };
         return icons[ext] || "\u{1F4C4}";
       }
-      toggleFolder(folderElement) {
+      async toggleFolder(folderElement, entry, currentFileHandle, onFileClick) {
         const children = folderElement.querySelector(".tree-children");
-        if (children) {
-          const isExpanded = folderElement.classList.contains("expanded");
-          if (isExpanded) {
-            children.style.display = "none";
-            folderElement.classList.remove("expanded");
-          } else {
-            children.style.display = "block";
-            folderElement.classList.add("expanded");
-          }
+        if (!children) return;
+        const isExpanded = folderElement.classList.contains("expanded");
+        if (isExpanded) {
+          children.style.display = "none";
+          folderElement.classList.remove("expanded");
+          return;
         }
+        if (!entry.childrenLoaded) {
+          children.innerHTML = "";
+          const childEntries = await fileSystem.readDirectoryLevel(entry.handle, entry.path);
+          entry.children = childEntries;
+          entry.childrenLoaded = true;
+          childEntries.forEach((child) => {
+            const childItem = this.createTreeItem(child, currentFileHandle, onFileClick);
+            children.appendChild(childItem);
+          });
+        }
+        children.style.display = "block";
+        folderElement.classList.add("expanded");
       }
       selectItem(itemElement) {
         document.querySelectorAll(".tree-item.selected").forEach((el) => {
@@ -29167,6 +29248,24 @@ var init_fileTree = __esm({
           await fileSystem.createDirectory(rootHandle, dirName);
           await this.refresh();
         }
+      }
+      async getAllFiles() {
+        const rootHandle = fileSystem.getRootHandle();
+        if (!rootHandle) return [];
+        return this.collectAllFiles(rootHandle, "");
+      }
+      async collectAllFiles(directoryHandle, parentPath) {
+        const files = [];
+        const entries = await fileSystem.readDirectoryLevel(directoryHandle, parentPath);
+        for (const entry of entries) {
+          if (entry.kind === "file") {
+            files.push({ name: entry.name, path: entry.path, handle: entry.handle });
+          } else if (entry.kind === "directory") {
+            const nestedFiles = await this.collectAllFiles(entry.handle, entry.path);
+            files.push(...nestedFiles);
+          }
+        }
+        return files;
       }
     };
     fileTree = new FileTree();
@@ -29401,6 +29500,7 @@ var require_editor = __commonJS({
         this.initEditor();
         this.initEventListeners();
         await fileTree.init(this.renderFileTree.bind(this));
+        await fileTree.restoreLastFolder();
         this.updateStatusBar();
       }
       async loadSettings() {
@@ -29662,21 +29762,8 @@ ${line.text}`;
           container.appendChild(item);
         });
       }
-      collectFiles(entries, parentPath = "") {
-        const files = [];
-        entries.forEach((entry) => {
-          const currentPath = parentPath ? `${parentPath}/${entry.name}` : entry.name;
-          if (entry.kind === "file") {
-            files.push({ name: entry.name, path: currentPath, handle: entry.handle });
-          }
-          if (entry.kind === "directory" && Array.isArray(entry.children)) {
-            files.push(...this.collectFiles(entry.children, currentPath));
-          }
-        });
-        return files;
-      }
       async quickOpenFile() {
-        const files = this.collectFiles(fileTree.entries || []);
+        const files = await fileTree.getAllFiles();
         if (!files.length) {
           alert("Abra uma pasta primeiro (Cmd/Ctrl+O).");
           return;

@@ -1,6 +1,9 @@
 class FileSystem {
   constructor() {
     this.rootHandle = null;
+    this.dbName = 'codesnip-editor-db';
+    this.storeName = 'kv';
+    this.lastFolderKey = 'lastFolderHandle';
   }
 
   async openDirectory() {
@@ -31,6 +34,19 @@ class FileSystem {
       if (a.kind !== 'directory' && b.kind === 'directory') return 1;
       return a.name.localeCompare(b.name);
     });
+  }
+
+  async readDirectoryLevel(handle, parentPath = '') {
+    const entries = await this.readDirectory(handle);
+    return entries.map((entry) => ({
+      name: entry.name,
+      kind: entry.kind,
+      handle: entry.handle,
+      parentHandle: handle,
+      path: parentPath ? `${parentPath}/${entry.name}` : entry.name,
+      children: null,
+      childrenLoaded: false,
+    }));
   }
 
   async readDirectoryRecursive(handle, depth = 0, maxDepth = 3, parentPath = '') {
@@ -162,6 +178,7 @@ class FileSystem {
     if (serialized) {
       chrome.storage.local.set({ lastOpenedFolder: serialized });
     }
+    await this.persistHandle(this.lastFolderKey, handle);
   }
 
   async serializeHandle(handle) {
@@ -183,6 +200,26 @@ class FileSystem {
     this.rootHandle = handle;
   }
 
+  async loadLastOpenedFolder() {
+    const handle = await this.getPersistedHandle(this.lastFolderKey);
+    if (!handle) return null;
+
+    try {
+      let permission = await handle.queryPermission({ mode: 'readwrite' });
+      if (permission !== 'granted') {
+        permission = await handle.requestPermission({ mode: 'readwrite' });
+      }
+      if (permission === 'granted') {
+        this.rootHandle = handle;
+        return handle;
+      }
+    } catch (err) {
+      console.warn('Cannot restore last folder handle:', err);
+    }
+
+    return null;
+  }
+
   async copyDirectoryContents(sourceDirHandle, targetDirHandle) {
     for await (const entry of sourceDirHandle.values()) {
       if (entry.kind === 'file') {
@@ -196,6 +233,48 @@ class FileSystem {
         await this.copyDirectoryContents(entry, nestedTarget);
       }
     }
+  }
+
+  async openDatabase() {
+    if (!globalThis.indexedDB) return null;
+    return new Promise((resolve) => {
+      const request = indexedDB.open(this.dbName, 1);
+      request.onupgradeneeded = () => {
+        const db = request.result;
+        if (!db.objectStoreNames.contains(this.storeName)) {
+          db.createObjectStore(this.storeName);
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => resolve(null);
+    });
+  }
+
+  async persistHandle(key, handle) {
+    const db = await this.openDatabase();
+    if (!db) return;
+
+    await new Promise((resolve) => {
+      const tx = db.transaction(this.storeName, 'readwrite');
+      tx.objectStore(this.storeName).put(handle, key);
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => resolve();
+    });
+    db.close();
+  }
+
+  async getPersistedHandle(key) {
+    const db = await this.openDatabase();
+    if (!db) return null;
+
+    const value = await new Promise((resolve) => {
+      const tx = db.transaction(this.storeName, 'readonly');
+      const req = tx.objectStore(this.storeName).get(key);
+      req.onsuccess = () => resolve(req.result || null);
+      req.onerror = () => resolve(null);
+    });
+    db.close();
+    return value;
   }
 }
 
