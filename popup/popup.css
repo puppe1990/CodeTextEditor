@@ -82,6 +82,16 @@ body {
   cursor: pointer;
 }
 
+.settings input {
+  width: 64px;
+  padding: 4px 8px;
+  background-color: #3c3c3c;
+  color: #cccccc;
+  border: 1px solid #555;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
 .footer {
   margin-top: 16px;
   text-align: center;

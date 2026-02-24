@@ -33,7 +33,7 @@ class FileSystem {
     });
   }
 
-  async readDirectoryRecursive(handle, depth = 0, maxDepth = 3) {
+  async readDirectoryRecursive(handle, depth = 0, maxDepth = 3, parentPath = '') {
     if (depth > maxDepth) return [];
     
     const entries = [];
@@ -44,12 +44,18 @@ class FileSystem {
         name: entry.name,
         kind: entry.kind,
         handle: entry.handle,
-        path: entry.handle.name,
+        parentHandle: handle,
+        path: parentPath ? `${parentPath}/${entry.handle.name}` : entry.handle.name,
       };
       
       if (entry.kind === 'directory' && depth < maxDepth) {
         try {
-          entryInfo.children = await this.readDirectoryRecursive(entry.handle, depth + 1, maxDepth);
+          entryInfo.children = await this.readDirectoryRecursive(
+            entry.handle,
+            depth + 1,
+            maxDepth,
+            entryInfo.path
+          );
         } catch (err) {
           console.warn(`Cannot read directory ${entry.name}:`, err);
           entryInfo.children = [];
@@ -85,9 +91,10 @@ class FileSystem {
     }
   }
 
-  async deleteEntry(handle) {
+  async deleteEntry(handle, parentHandle = null) {
     try {
-      const parent = await this.getParentHandle(handle);
+      const parent = parentHandle || await this.getParentHandle(handle);
+      if (!parent) return false;
       await parent.removeEntry(handle.name, { recursive: true });
       return true;
     } catch (err) {
@@ -96,16 +103,22 @@ class FileSystem {
     }
   }
 
-  async renameEntry(handle, newName) {
+  async renameEntry(handle, newName, parentHandle = null) {
     try {
-      const parent = await this.getParentHandle(handle);
-      
+      const parent = parentHandle || await this.getParentHandle(handle);
+      if (!parent) return false;
+
       if (handle.kind === 'directory') {
-        await parent.getDirectoryHandle(newName, { create: true });
+        const targetDir = await parent.getDirectoryHandle(newName, { create: true });
+        await this.copyDirectoryContents(handle, targetDir);
       } else {
-        await parent.getFileHandle(newName, { create: true });
+        const sourceFile = await handle.getFile();
+        const targetFile = await parent.getFileHandle(newName, { create: true });
+        const writable = await targetFile.createWritable();
+        await writable.write(await sourceFile.text());
+        await writable.close();
       }
-      
+
       await parent.removeEntry(handle.name, { recursive: true });
       return true;
     } catch (err) {
@@ -114,13 +127,29 @@ class FileSystem {
     }
   }
 
-  async getParentHandle(handle) {
-    const entries = await this.rootHandle.values();
-    for await (const entry of entries) {
-      if (entry.kind === handle.kind && entry.name === handle.name) {
-        return this.rootHandle;
+  async getParentHandle(targetHandle, currentHandle = this.rootHandle) {
+    if (!currentHandle) return null;
+
+    for await (const entry of currentHandle.values()) {
+      let isMatch = entry.kind === targetHandle.kind && entry.name === targetHandle.name;
+      if (typeof entry.isSameEntry === 'function') {
+        try {
+          isMatch = await entry.isSameEntry(targetHandle);
+        } catch (err) {
+          isMatch = entry.kind === targetHandle.kind && entry.name === targetHandle.name;
+        }
+      }
+
+      if (isMatch) {
+        return currentHandle;
+      }
+
+      if (entry.kind === 'directory') {
+        const found = await this.getParentHandle(targetHandle, entry);
+        if (found) return found;
       }
     }
+
     return null;
   }
 
@@ -152,6 +181,21 @@ class FileSystem {
 
   setRootHandle(handle) {
     this.rootHandle = handle;
+  }
+
+  async copyDirectoryContents(sourceDirHandle, targetDirHandle) {
+    for await (const entry of sourceDirHandle.values()) {
+      if (entry.kind === 'file') {
+        const sourceFile = await entry.getFile();
+        const targetFile = await targetDirHandle.getFileHandle(entry.name, { create: true });
+        const writable = await targetFile.createWritable();
+        await writable.write(await sourceFile.text());
+        await writable.close();
+      } else if (entry.kind === 'directory') {
+        const nestedTarget = await targetDirHandle.getDirectoryHandle(entry.name, { create: true });
+        await this.copyDirectoryContents(entry, nestedTarget);
+      }
+    }
   }
 }
 

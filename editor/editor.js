@@ -1,104 +1,80 @@
+import { EditorState } from '@codemirror/state';
+import {
+  EditorView,
+  keymap,
+  lineNumbers,
+  highlightActiveLine,
+  highlightActiveLineGutter,
+} from '@codemirror/view';
+import {
+  defaultKeymap,
+  history,
+  historyKeymap,
+  indentWithTab,
+  toggleComment,
+} from '@codemirror/commands';
+import { javascript } from '@codemirror/lang-javascript';
+import { html } from '@codemirror/lang-html';
+import { css } from '@codemirror/lang-css';
+import { python } from '@codemirror/lang-python';
+import { json } from '@codemirror/lang-json';
+import { markdown } from '@codemirror/lang-markdown';
+import { sql } from '@codemirror/lang-sql';
+import { oneDark } from '@codemirror/theme-one-dark';
+import {
+  bracketMatching,
+  foldGutter,
+  indentOnInput,
+  syntaxHighlighting,
+  defaultHighlightStyle,
+} from '@codemirror/language';
+import { closeBrackets, closeBracketsKeymap } from '@codemirror/autocomplete';
+import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
+import { commentKeymap } from '@codemirror/comment';
 import { fileTree } from './fileTree.js';
 import { shortcuts } from './shortcuts.js';
 
-console.log('CodeSnip Editor v1.0.2 loaded');
+const LANGUAGE_EXTENSIONS = {
+  js: javascript({ jsx: true, typescript: false }),
+  ts: javascript({ jsx: false, typescript: true }),
+  jsx: javascript({ jsx: true, typescript: false }),
+  tsx: javascript({ jsx: true, typescript: true }),
+  html: html(),
+  htm: html(),
+  css: css(),
+  scss: css(),
+  less: css(),
+  py: python(),
+  python: python(),
+  json: json(),
+  md: markdown(),
+  mdx: markdown(),
+  sql: sql(),
+};
 
-class SimpleEditorView {
-  constructor(parent, { onChange, onCursorChange, fontSize, tabSize }) {
-    this.textarea = document.createElement('textarea');
-    this.textarea.className = 'simple-editor-input';
-    this.textarea.spellcheck = false;
-    this.textarea.wrap = 'off';
-    this.textarea.style.fontSize = `${fontSize}px`;
-    this.textarea.style.tabSize = String(tabSize);
-
-    this.onChange = onChange;
-    this.onCursorChange = onCursorChange;
-
-    this.textarea.addEventListener('input', () => {
-      this.onChange?.();
-    });
-
-    this.textarea.addEventListener('click', () => {
-      this.onCursorChange?.();
-    });
-
-    this.textarea.addEventListener('keyup', () => {
-      this.onCursorChange?.();
-    });
-
-    this.textarea.addEventListener('keydown', (e) => {
-      if (e.key === 'Tab') {
-        e.preventDefault();
-        const start = this.textarea.selectionStart;
-        const end = this.textarea.selectionEnd;
-        const spaces = ' '.repeat(Math.max(1, Number(tabSize) || 2));
-        const content = this.textarea.value;
-        this.textarea.value = `${content.slice(0, start)}${spaces}${content.slice(end)}`;
-        this.textarea.selectionStart = this.textarea.selectionEnd = start + spaces.length;
-        this.onChange?.();
-        this.onCursorChange?.();
-      }
-    });
-
-    parent.innerHTML = '';
-    parent.appendChild(this.textarea);
-  }
-
-  getContent() {
-    return this.textarea.value;
-  }
-
-  setContent(content) {
-    this.textarea.value = content;
-    this.textarea.selectionStart = 0;
-    this.textarea.selectionEnd = 0;
-  }
-
-  focus() {
-    this.textarea.focus();
-  }
-
-  getSelection() {
-    return {
-      start: this.textarea.selectionStart,
-      end: this.textarea.selectionEnd,
-    };
-  }
-
-  setCursor(pos) {
-    this.textarea.selectionStart = pos;
-    this.textarea.selectionEnd = pos;
-    this.onCursorChange?.();
-  }
-
-  replaceRange(from, to, insert) {
-    const content = this.getContent();
-    this.setContent(`${content.slice(0, from)}${insert}${content.slice(to)}`);
-  }
-
-  lineAt(pos) {
-    const content = this.getContent();
-    const safePos = Math.max(0, Math.min(pos, content.length));
-    const before = content.slice(0, safePos);
-    const lineNumber = before.split('\n').length;
-    const lineStart = before.lastIndexOf('\n') + 1;
-    const lineEndIdx = content.indexOf('\n', safePos);
-    const lineEnd = lineEndIdx === -1 ? content.length : lineEndIdx;
-
-    return {
-      number: lineNumber,
-      from: lineStart,
-      to: lineEnd,
-      text: content.slice(lineStart, lineEnd),
-    };
-  }
-
-  get lines() {
-    const content = this.getContent();
-    return content.length ? content.split('\n').length : 1;
-  }
-}
+const LIGHT_THEME = EditorView.theme({
+  '&': {
+    backgroundColor: '#ffffff',
+    color: '#333333',
+  },
+  '.cm-content': {
+    caretColor: '#000000',
+  },
+  '.cm-cursor': {
+    borderLeftColor: '#000000',
+  },
+  '.cm-activeLine': {
+    backgroundColor: '#f0f0f0',
+  },
+  '.cm-gutters': {
+    backgroundColor: '#f8f8f8',
+    color: '#6e6e6e',
+    borderRight: '1px solid #d4d4d4',
+  },
+  '.cm-activeLineGutter': {
+    backgroundColor: '#e8e8e8',
+  },
+}, { dark: false });
 
 class CodeEditor {
   constructor() {
@@ -106,6 +82,7 @@ class CodeEditor {
     this.currentFileHandle = null;
     this.currentFileName = 'No file open';
     this.currentLanguage = 'Plain Text';
+    this.currentLanguageExtension = [];
     this.dirty = false;
     this.settings = {
       theme: 'dark',
@@ -157,21 +134,136 @@ class CodeEditor {
     return langMap[ext] || 'Plain Text';
   }
 
-  initEditor() {
-    const editorElement = document.getElementById('editor');
-    this.view = new SimpleEditorView(editorElement, {
-      fontSize: this.settings.fontSize,
-      tabSize: this.settings.tabSize,
-      onChange: () => {
-        this.dirty = true;
-        this.updateStatusBar();
+  getLanguageExtension(fileName) {
+    const ext = fileName.includes('.') ? fileName.split('.').pop().toLowerCase() : '';
+    return LANGUAGE_EXTENSIONS[ext] || [];
+  }
+
+  getEditorExtensions(languageExtension) {
+    const uiTheme = EditorView.theme({
+      '&': {
+        fontSize: `${this.settings.fontSize}px`,
       },
-      onCursorChange: () => {
-        this.updateStatusBar();
+      '.cm-content': {
+        fontFamily: "'Fira Code', 'Consolas', 'Monaco', monospace",
       },
     });
 
+    const extensions = [
+      lineNumbers(),
+      highlightActiveLine(),
+      highlightActiveLineGutter(),
+      history(),
+      foldGutter(),
+      bracketMatching(),
+      closeBrackets(),
+      indentOnInput(),
+      highlightSelectionMatches(),
+      syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+      EditorState.tabSize.of(this.settings.tabSize),
+      keymap.of([
+        ...defaultKeymap,
+        ...historyKeymap,
+        ...closeBracketsKeymap,
+        ...searchKeymap,
+        ...commentKeymap,
+        indentWithTab,
+        {
+          key: 'Mod-s',
+          run: () => {
+            this.saveCurrentFile();
+            return true;
+          },
+        },
+        {
+          key: 'Mod-d',
+          run: () => {
+            this.duplicateLine();
+            return true;
+          },
+        },
+        {
+          key: 'Mod-Shift-k',
+          run: () => {
+            this.deleteLine();
+            return true;
+          },
+        },
+        {
+          key: 'Alt-ArrowUp',
+          run: () => {
+            this.moveLine(-1);
+            return true;
+          },
+        },
+        {
+          key: 'Alt-ArrowDown',
+          run: () => {
+            this.moveLine(1);
+            return true;
+          },
+        },
+      ]),
+      languageExtension,
+      EditorView.updateListener.of((update) => {
+        if (update.docChanged) {
+          this.dirty = true;
+          this.updateStatusBar();
+        }
+        if (update.selectionSet) {
+          this.updateStatusBar();
+        }
+      }),
+      uiTheme,
+    ];
+
+    if (this.settings.theme === 'dark') {
+      extensions.push(oneDark);
+    } else {
+      extensions.push(LIGHT_THEME);
+    }
+
+    return extensions;
+  }
+
+  createState(doc, languageExtension) {
+    return EditorState.create({
+      doc,
+      extensions: this.getEditorExtensions(languageExtension),
+    });
+  }
+
+  initEditor() {
+    const editorElement = document.getElementById('editor');
+    this.currentLanguageExtension = [];
+
+    this.view = new EditorView({
+      state: this.createState('', this.currentLanguageExtension),
+      parent: editorElement,
+    });
+
     this.updateThemeUI();
+  }
+
+  rebuildEditorState({ preserveSelection = true } = {}) {
+    if (!this.view) return;
+
+    const currentDoc = this.view.state.doc.toString();
+    const currentSelection = this.view.state.selection.main;
+    const selectionAnchor = preserveSelection
+      ? Math.min(currentSelection.anchor, currentDoc.length)
+      : 0;
+
+    const nextState = this.createState(currentDoc, this.currentLanguageExtension);
+    this.view.setState(nextState);
+
+    if (preserveSelection) {
+      this.view.dispatch({
+        selection: { anchor: selectionAnchor },
+      });
+    }
+
+    this.updateStatusBar();
   }
 
   updateThemeUI() {
@@ -186,26 +278,31 @@ class CodeEditor {
     this.settings.theme = this.settings.theme === 'dark' ? 'light' : 'dark';
     chrome.storage.local.set({ settings: this.settings });
     this.updateThemeUI();
+    this.rebuildEditorState();
   }
 
-  async openFile(handle) {
+  async openFile(handle, path = handle?.name || '') {
     this.currentFileHandle = handle;
     const file = await handle.getFile();
     const content = await file.text();
 
-    this.view.setContent(content);
-
     this.currentFileName = file.name;
     this.currentLanguage = this.getLanguageFromFileName(file.name);
+    this.currentLanguageExtension = this.getLanguageExtension(file.name);
+
+    const nextState = this.createState(content, this.currentLanguageExtension);
+    this.view.setState(nextState);
+
     this.dirty = false;
     this.updateStatusBar();
     this.view.focus();
+    this.saveRecentFile(path || file.name);
   }
 
   async saveCurrentFile() {
     if (!this.currentFileHandle) return;
 
-    const content = this.view.getContent();
+    const content = this.view.state.doc.toString();
     const writable = await this.currentFileHandle.createWritable();
     await writable.write(content);
     await writable.close();
@@ -216,56 +313,64 @@ class CodeEditor {
   duplicateLine() {
     if (!this.view) return;
 
-    const { start } = this.view.getSelection();
-    const line = this.view.lineAt(start);
+    const { from } = this.view.state.selection.main;
+    const line = this.view.state.doc.lineAt(from);
     const insert = `\n${line.text}`;
-    this.view.replaceRange(line.to, line.to, insert);
-    this.view.setCursor(line.to + insert.length);
-    this.dirty = true;
-    this.updateStatusBar();
+
+    this.view.dispatch({
+      changes: { from: line.to, to: line.to, insert },
+      selection: { anchor: line.to + insert.length },
+    });
   }
 
   deleteLine() {
     if (!this.view) return;
 
-    const { start } = this.view.getSelection();
-    const line = this.view.lineAt(start);
+    const { from } = this.view.state.selection.main;
+    const line = this.view.state.doc.lineAt(from);
 
     let fromPos = line.from;
     let toPos = line.to;
 
-    const content = this.view.getContent();
+    const content = this.view.state.doc.toString();
     if (toPos < content.length && content[toPos] === '\n') {
       toPos += 1;
     } else if (fromPos > 0 && content[fromPos - 1] === '\n') {
       fromPos -= 1;
     }
 
-    this.view.replaceRange(fromPos, toPos, '');
-    this.view.setCursor(fromPos);
-    this.dirty = true;
-    this.updateStatusBar();
+    this.view.dispatch({
+      changes: { from: fromPos, to: toPos, insert: '' },
+      selection: { anchor: fromPos },
+    });
   }
 
   moveLine(direction) {
     if (!this.view) return;
 
-    const { start } = this.view.getSelection();
-    const current = this.view.lineAt(start);
-    const content = this.view.getContent();
-    const lines = content.split('\n');
-    const currentIdx = current.number - 1;
+    const doc = this.view.state.doc.toString();
+    const lines = doc.split('\n');
+    const { from } = this.view.state.selection.main;
+    const currentLine = this.view.state.doc.lineAt(from);
+    const currentIdx = currentLine.number - 1;
     const targetIdx = currentIdx + direction;
 
     if (targetIdx < 0 || targetIdx >= lines.length) return;
 
     [lines[currentIdx], lines[targetIdx]] = [lines[targetIdx], lines[currentIdx]];
-    this.view.setContent(lines.join('\n'));
+    const nextDoc = lines.join('\n');
 
-    const newPos = lines.slice(0, targetIdx).join('\n').length + (targetIdx > 0 ? 1 : 0);
-    this.view.setCursor(newPos);
-    this.dirty = true;
-    this.updateStatusBar();
+    const anchor = lines.slice(0, targetIdx).join('\n').length + (targetIdx > 0 ? 1 : 0);
+
+    this.view.dispatch({
+      changes: { from: 0, to: this.view.state.doc.length, insert: nextDoc },
+      selection: { anchor },
+    });
+  }
+
+  toggleComment() {
+    if (!this.view) return;
+    toggleComment(this.view);
   }
 
   updateStatusBar() {
@@ -280,9 +385,9 @@ class CodeEditor {
     }
 
     if (cursorEl && this.view) {
-      const { start } = this.view.getSelection();
-      const line = this.view.lineAt(start);
-      const col = start - line.from + 1;
+      const pos = this.view.state.selection.main.head;
+      const line = this.view.state.doc.lineAt(pos);
+      const col = pos - line.from + 1;
       cursorEl.textContent = `Ln ${line.number}, Col ${col}`;
     }
 
@@ -340,7 +445,7 @@ class CodeEditor {
     }
 
     if (matches.length === 1) {
-      await this.openFile(matches[0].handle);
+      await this.openFile(matches[0].handle, matches[0].path);
       return;
     }
 
@@ -352,7 +457,7 @@ class CodeEditor {
     const index = Number(choice) - 1;
 
     if (Number.isInteger(index) && index >= 0 && index < topMatches.length) {
-      await this.openFile(topMatches[index].handle);
+      await this.openFile(topMatches[index].handle, topMatches[index].path);
     }
   }
 
@@ -394,6 +499,7 @@ class CodeEditor {
       edit: [
         { label: 'Duplicate Line', run: () => this.duplicateLine() },
         { label: 'Delete Line', run: () => this.deleteLine() },
+        { label: 'Toggle Comment', run: () => this.toggleComment() },
       ],
       view: [
         { label: 'Toggle Sidebar', run: () => shortcuts.toggleSidebar() },
@@ -407,7 +513,6 @@ class CodeEditor {
         const menuName = btn.dataset.action;
         const items = menuDefs[menuName] || [];
         this.toggleTopMenu(btn, menuName, items);
-        this.openMenuFallbackPrompt(menuName);
       });
     });
 
@@ -454,36 +559,12 @@ class CodeEditor {
     this.activeTopMenu = null;
   }
 
-  async openMenuFallbackPrompt(menuName) {
-    const actions = {
-      file: ['open', 'newfile', 'newfolder', 'save'],
-      edit: ['duplicate', 'delete'],
-      view: ['sidebar', 'theme'],
-    };
-
-    const chosen = prompt(
-      `Menu ${menuName.toUpperCase()} - escolha: ${actions[menuName].join(', ')}`
-    );
-
-    if (!chosen) return;
-    const value = chosen.trim().toLowerCase();
-
-    if (menuName === 'file') {
-      if (value === 'open') await fileTree.openFolder();
-      if (value === 'newfile') await fileTree.createNewFile();
-      if (value === 'newfolder') await fileTree.createNewFolder();
-      if (value === 'save') await this.saveCurrentFile();
-    }
-
-    if (menuName === 'edit') {
-      if (value === 'duplicate') this.duplicateLine();
-      if (value === 'delete') this.deleteLine();
-    }
-
-    if (menuName === 'view') {
-      if (value === 'sidebar') shortcuts.toggleSidebar();
-      if (value === 'theme') this.toggleTheme();
-    }
+  saveRecentFile(filePath) {
+    chrome.storage.local.get(['recentFiles'], (result) => {
+      const list = Array.isArray(result.recentFiles) ? result.recentFiles : [];
+      const next = [filePath, ...list.filter((item) => item !== filePath)].slice(0, 20);
+      chrome.storage.local.set({ recentFiles: next });
+    });
   }
 }
 

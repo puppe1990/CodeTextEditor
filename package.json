@@ -1,0 +1,43 @@
+{
+  "name": "codetexteditor",
+  "version": "1.0.0",
+  "description": "Extensão Chrome com editor de código em nova aba, explorador de arquivos e atalhos de produtividade.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "build": "esbuild editor/editor.js --bundle --format=esm --outfile=editor/editor.bundle.js",
+    "build:watch": "esbuild editor/editor.js --bundle --format=esm --outfile=editor/editor.bundle.js --watch"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/puppe1990/CodeTextEditor.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/puppe1990/CodeTextEditor/issues"
+  },
+  "homepage": "https://github.com/puppe1990/CodeTextEditor#readme",
+  "dependencies": {
+    "@codemirror/autocomplete": "^6.20.0",
+    "@codemirror/commands": "^6.10.2",
+    "@codemirror/comment": "^0.19.1",
+    "@codemirror/lang-css": "^6.3.1",
+    "@codemirror/lang-html": "^6.4.11",
+    "@codemirror/lang-javascript": "^6.2.4",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/lang-python": "^6.2.1",
+    "@codemirror/lang-sql": "^6.10.0",
+    "@codemirror/language": "^6.12.1",
+    "@codemirror/search": "^6.6.0",
+    "@codemirror/state": "^6.5.4",
+    "@codemirror/theme-one-dark": "^6.1.3",
+    "@codemirror/view": "^6.39.15"
+  },
+  "devDependencies": {
+    "esbuild": "^0.27.3"
+  }
+}

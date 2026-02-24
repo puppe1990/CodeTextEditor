@@ -40,7 +40,23 @@ class Shortcuts {
             break;
           case '/':
             e.preventDefault();
+            this.toggleComment();
             break;
+          case 'd':
+            e.preventDefault();
+            this.duplicateLine();
+            break;
+        }
+      }
+
+      if (!isCtrl && !isShift && isAlt) {
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          this.moveLine(-1);
+        }
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          this.moveLine(1);
         }
       }
       
@@ -116,6 +132,24 @@ class Shortcuts {
   deleteLine() {
     if (this.editor && this.editor.deleteLine) {
       this.editor.deleteLine();
+    }
+  }
+
+  duplicateLine() {
+    if (this.editor && this.editor.duplicateLine) {
+      this.editor.duplicateLine();
+    }
+  }
+
+  moveLine(direction) {
+    if (this.editor && this.editor.moveLine) {
+      this.editor.moveLine(direction);
+    }
+  }
+
+  toggleComment() {
+    if (this.editor && this.editor.toggleComment) {
+      this.editor.toggleComment();
     }
   }
 }

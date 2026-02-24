@@ -15,6 +15,9 @@ Extensão Chrome com editor de código em nova aba, explorador de arquivos e ata
 
 ## Instalação (modo desenvolvedor)
 
+1. Instale dependências e gere o bundle do editor:
+   - `npm install`
+   - `npm run build`
 1. Abra `chrome://extensions`
 2. Ative `Developer mode`
 3. Clique em `Load unpacked`

@@ -60,7 +60,7 @@ class FileTree {
         }
         this.selectItem(itemContent);
         if (onFileClick) {
-          await onFileClick(entry.handle);
+          await onFileClick(entry.handle, entry.path);
         }
       });
       
@@ -177,7 +177,7 @@ class FileTree {
   async renameEntry(entry) {
     const newName = prompt('Enter new name:', entry.name);
     if (newName && newName !== entry.name) {
-      await fileSystem.renameEntry(entry.handle, newName);
+      await fileSystem.renameEntry(entry.handle, newName, entry.parentHandle);
       await this.refresh();
     }
   }
@@ -185,7 +185,7 @@ class FileTree {
   async deleteEntry(entry) {
     const confirmed = confirm(`Are you sure you want to delete "${entry.name}"?`);
     if (confirmed) {
-      await fileSystem.deleteEntry(entry.handle);
+      await fileSystem.deleteEntry(entry.handle, entry.parentHandle);
       await this.refresh();
     }
   }
